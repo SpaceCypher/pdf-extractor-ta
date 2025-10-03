@@ -28,6 +28,7 @@ export function ExtractionInterface() {
     results,
     addResult,
     setResults,
+    clearResults,
     selectedModels,
     showAnnotations,
     reset,
@@ -97,6 +98,8 @@ export function ExtractionInterface() {
   };
 
   const handleFileUpload = async (file: File) => {
+    // Clear any previous results when uploading a new file
+    clearResults();
     setProcessing({ status: 'uploading', progress: 0, currentStep: 'Uploading file...' });
     
     try {

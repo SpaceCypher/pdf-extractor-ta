@@ -55,88 +55,36 @@ export function PDFViewer({ file, uploadId, results, showAnnotations = true }: P
     }
   }, [file]);
 
-  // Get elements for current page
+  // Get elements for current page - prioritize actual results over test data
   const actualElements = results?.elements?.filter(
     element => element.bbox.page === currentPage
   ) || [];
 
-  // Enhanced test elements with more variety for better demo
-  const testElements: ExtractedElement[] = actualElements.length === 0 ? [
+  // Only show test elements if no actual results are available AND no upload is in progress
+  const showTestData = actualElements.length === 0 && !uploadId;
+  
+  const testElements: ExtractedElement[] = showTestData ? [
     {
-      id: 'test_title',
-      type: 'title',
-      content: 'Document Title - Financial Report Q4 2024',
+      id: 'demo_notice',
+      type: 'text',
+      content: 'Demo Mode: Upload and process a PDF to see real extraction results with annotations.',
       bbox: { x1: 80, y1: 60, x2: 520, y2: 95, page: currentPage },
       page: currentPage,
-      confidence: 0.98
-    },
-    {
-      id: 'test_header1',
-      type: 'header', 
-      content: '1. Executive Summary',
-      bbox: { x1: 80, y1: 130, x2: 350, y2: 155, page: currentPage },
-      page: currentPage,
-      confidence: 0.95
-    },
-    {
-      id: 'test_text1',
-      type: 'text',
-      content: 'This report presents the financial performance and key metrics for Q4 2024, highlighting significant growth in revenue and market expansion initiatives.',
-      bbox: { x1: 80, y1: 170, x2: 520, y2: 215, page: currentPage },
-      page: currentPage, 
-      confidence: 0.92
-    },
-    {
-      id: 'test_header2',
-      type: 'header',
-      content: '2. Financial Performance',
-      bbox: { x1: 80, y1: 240, x2: 380, y2: 265, page: currentPage },
-      page: currentPage,
-      confidence: 0.94
-    },
-    {
-      id: 'test_table',
-      type: 'table',
-      content: 'Revenue | Q3 2024 | Q4 2024 | Growth\nTotal Revenue | $2.1M | $2.8M | +33%\nNet Profit | $450K | $620K | +38%',
-      bbox: { x1: 80, y1: 280, x2: 520, y2: 380, page: currentPage },
-      page: currentPage,
-      confidence: 0.89
-    },
-    {
-      id: 'test_text2',
-      type: 'text',
-      content: 'The significant revenue growth of 33% demonstrates strong market demand and successful execution of our strategic initiatives.',
-      bbox: { x1: 80, y1: 400, x2: 520, y2: 435, page: currentPage },
-      page: currentPage,
-      confidence: 0.91
-    },
-    {
-      id: 'test_list',
-      type: 'list',
-      content: '• Market expansion into 3 new regions\n• Launch of premium product line\n• Strategic partnerships with industry leaders',
-      bbox: { x1: 100, y1: 460, x2: 500, y2: 520, page: currentPage },
-      page: currentPage,
-      confidence: 0.87
-    },
-    {
-      id: 'test_image',
-      type: 'image',
-      content: '[Chart: Revenue Growth Trend 2024]',
-      bbox: { x1: 320, y1: 540, x2: 520, y2: 640, page: currentPage },
-      page: currentPage,
-      confidence: 0.93
+      confidence: 1.0
     }
   ] : [];
 
-  const currentPageElements = [...actualElements, ...testElements];
+  const currentPageElements = actualElements.length > 0 ? actualElements : testElements;
 
-  // Get summary data
-  const elementsSummary = results?.summary?.by_type || {
-    text: 208,
-    header: 44,
-    footer: 1,
-    title: 1,
-  };
+  // Get summary data - use actual results or calculate from elements
+  const elementsSummary = results?.summary?.by_type || 
+    (actualElements.length > 0 ? 
+      actualElements.reduce((acc, element) => {
+        acc[element.type] = (acc[element.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>) :
+      showTestData ? { text: 1 } : {}
+    );
 
   const handlePreviousPage = () => {
     setCurrentPage(prev => Math.max(1, prev - 1));
