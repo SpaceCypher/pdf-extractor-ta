@@ -349,6 +349,15 @@ export function ExtractionInterface() {
                         </Button>
                         <ProcessingSettings />
                         <DocumentHistory />
+                        <Button 
+                          onClick={handleExtractAll}
+                          disabled={isProcessingOrUploading}
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700 text-white h-6 px-2 text-xs ml-1"
+                        >
+                          <FileText className="h-3 w-3 mr-1" />
+                          Extract
+                        </Button>
                         <DocumentTemplates />
                       </div>
                     </div>
@@ -371,20 +380,6 @@ export function ExtractionInterface() {
                           'Extract All'
                         )}
                       </Button>
-                    </div>
-                    
-                    {/* Additional Action Buttons */}
-                    <div className="flex items-center justify-center gap-2 mt-2 pt-2 border-t border-gray-200">
-                      <Button 
-                        onClick={handleExtractAll}
-                        disabled={isProcessingOrUploading}
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 text-xs px-3"
-                      >
-                        <FileText className="h-3 w-3 mr-1" />
-                        Extract
-                      </Button>
-                      <DocumentTemplates />
                     </div>
                     
                     {!hasResults && processing.status !== 'processing' && (
