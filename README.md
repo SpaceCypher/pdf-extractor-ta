@@ -7,6 +7,7 @@ A comprehensive, production-ready web application for extracting content from PD
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Modal-green)
 ![Models](https://img.shields.io/badge/AI%20Models-3-orange)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## 🌟 Live Demo
 
@@ -130,7 +131,7 @@ npm start
 
 ```
 pdf-extraction-playground/
-├── src/
+├── src/                        # Frontend source code
 │   ├── app/                    # Next.js App Router pages
 │   │   ├── page.tsx           # Home page (extraction interface)
 │   │   ├── examples/          # Example documents showcase
@@ -145,19 +146,26 @@ pdf-extraction-playground/
 │   │   ├── progress/         # Progress tracking
 │   │   ├── ui/               # Shadcn/UI components
 │   │   └── layout/           # Navigation and layout
-│   ├── lib/                  # Utilities and configuration
-│   │   ├── api.ts           # Backend API integration
-│   │   ├── store.ts         # Zustand state management
-│   │   └── utils.ts         # Helper functions
-│   └── styles/              # Global styles
-├── backend/                 # FastAPI backend (separate deployment)
-├── public/                  # Static assets
-├── docs/                    # Comprehensive documentation
+│   └── lib/                  # Utilities and configuration
+│       ├── api.ts           # Backend API integration
+│       ├── store.ts         # Zustand state management
+│       └── utils.ts         # Helper functions
+├── backend/                   # FastAPI backend (Modal deployment)
+│   ├── modal_app.py          # Main Modal application
+│   ├── models/               # AI model integrations
+│   ├── requirements.txt      # Python dependencies
+│   └── README.md            # Backend documentation
+├── docs/                     # Comprehensive documentation
 │   ├── USER_GUIDE.md        # Step-by-step user manual
 │   ├── API_DOCUMENTATION.md # Complete API reference
 │   ├── MODEL_SELECTION_GUIDE.md # AI model comparison guide
 │   └── TECHNICAL_ARCHITECTURE.md # System architecture docs
-└── [Additional files...]
+├── public/                   # Static assets
+├── README.md                # Main project documentation
+├── DEPLOYMENT.md           # Deployment instructions
+├── CONTRIBUTING.md         # Contribution guidelines
+├── LICENSE                 # MIT License
+└── package.json           # Frontend dependencies
 ```
 
 ## 🔌 API Reference

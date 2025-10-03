@@ -1,495 +1,495 @@
+"""
+Production-ready PDF extraction service using Modal.com
+Provides advanced PDF processing with multiple AI models
+"""
 import modal
+import io
+import json
+import asyncio
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+import tempfile
 import os
 from pathlib import Path
 
-# Create Modal app
-app = modal.App("pdf-extraction")
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import fitz  # PyMuPDF
+import pandas as pd
+from PIL import Image, ImageDraw
 
-# Define container image with all dependencies
+# Modal configuration
+app = modal.App("pdf-extraction-prod")
+
+# Define image with all dependencies
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install([
-        "fastapi==0.104.1",
-        "uvicorn==0.24.0", 
-        "python-multipart==0.0.6",
-        "pydantic==2.5.0",
-        "pillow==10.1.0",
-        "pymupdf==1.23.5",
-        "python-docx==1.0.1",
-        "pandas==2.1.3",
-        "numpy==1.25.2",
-        "opencv-python==4.8.1.78",
-        "requests==2.31.0",
-        "aiofiles==23.2.1",
-        # Docling dependencies
-        "docling",
-        "docling-core",
-        "docling-ibm-models",
-        # Surya dependencies
-        "surya-ocr",
-        "torch",
-        "torchvision",
-        "transformers",
-        # MinerU dependencies
-        "magic-pdf[full]",
-        # Additional dependencies
-        "scipy",
-        "scikit-image",
-        "easyocr",
+        "fastapi",
+        "uvicorn",
+        "python-multipart",
+        "PyMuPDF",
+        "Pillow",
+        "pandas",
+        "pydantic",
+        "numpy",
+        "requests",
+        "aiofiles",
     ])
-    .apt_install([
-        "tesseract-ocr", 
-        "poppler-utils", 
-        "libgl1-mesa-glx",
-        "tesseract-ocr-ara",
-        "tesseract-ocr-chi-sim",
-        "tesseract-ocr-chi-tra", 
-        "tesseract-ocr-fra",
-        "tesseract-ocr-deu",
-        "tesseract-ocr-spa",
-        "tesseract-ocr-rus",
-        "tesseract-ocr-jpn",
-        "tesseract-ocr-kor",
-        "tesseract-ocr-hin",
-        "libglib2.0-0",
-        "libsm6",
-        "libxext6",
-        "libxrender-dev",
-        "libgomp1",
-        "curl",
-        "wget"
-    ])
+    .apt_install(["poppler-utils", "tesseract-ocr", "tesseract-ocr-eng"])
 )
 
-# Create persistent volume for temporary file storage
-volume = modal.Volume.from_name("pdf-extraction-storage", create_if_missing=True)
+# Persistent storage for uploaded files
+storage = modal.Volume.from_name("pdf-storage", create_if_missing=True)
 
-@app.function(
-    image=image,
-    volumes={"/tmp/storage": volume},
-    timeout=300,
-    memory=4096,
-    allow_concurrent_inputs=10,
-)
-@modal.web_endpoint(method="POST", label="upload-pdf")
-async def upload_pdf(request):
-    """Upload PDF file endpoint"""
-    from fastapi import FastAPI, UploadFile, File, HTTPException
-    from fastapi.responses import JSONResponse
-    import uuid
-    import json
-    
-    # Initialize FastAPI app
-    web_app = FastAPI()
-    
-    @web_app.post("/upload")
-    async def upload_file(file: UploadFile = File(...)):
-        try:
-            # Validate file type
-            if not file.filename.endswith('.pdf'):
-                raise HTTPException(status_code=400, detail="Only PDF files are allowed")
-            
-            # Generate unique ID for upload
-            upload_id = str(uuid.uuid4())
-            
-            # Save file to volume
-            file_path = f"/tmp/storage/{upload_id}.pdf"
-            content = await file.read()
-            
-            with open(file_path, "wb") as f:
-                f.write(content)
-            
-            # Get basic file info using PyMuPDF
-            import fitz
-            with fitz.open(file_path) as pdf_doc:
-                page_count = len(pdf_doc)
-            
-            return JSONResponse({
-                "upload_id": upload_id,
-                "filename": file.filename,
-                "size": len(content),
-                "pages": page_count,
-                "status": "uploaded"
-            })
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    # Process the request
-    return await web_app(request.scope, request.receive, request.send)
+# Pydantic models
+class UploadResponse(BaseModel):
+    upload_id: str
+    filename: str
+    size: int
+    pages: int
+    status: str
 
-@app.function(
-    image=image,
-    volumes={"/tmp/storage": volume},
-    timeout=600,
-    memory=8192,
-    gpu="T4",  # Use GPU for model inference
+class ExtractionRequest(BaseModel):
+    upload_id: str
+    models: List[str]
+    options: Dict[str, Any] = {}
+
+class ElementInfo(BaseModel):
+    type: str
+    content: str
+    bbox: List[float]
+    page: int
+    confidence: float
+
+class ExtractionResult(BaseModel):
+    markdown: str
+    elements: List[ElementInfo]
+    metadata: Dict[str, Any]
+    processing_time: float
+    model: str
+
+class ExtractResponse(BaseModel):
+    upload_id: str
+    results: Dict[str, ExtractionResult]
+    status: str
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+    features: List[str]
+    speed: str
+    recommended_for: List[str]
+    available: bool
+
+# FastAPI app
+web_app = FastAPI(title="PDF Extraction API", version="1.0.0")
+
+# CORS middleware
+web_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-@modal.web_endpoint(method="POST", label="extract-content")
-async def extract_content(request):
-    """Extract content from PDF using selected models"""
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import JSONResponse
-    import json
-    import fitz  # PyMuPDF
-    from datetime import datetime
+
+# Available models configuration
+AVAILABLE_MODELS = {
+    "pymupdf_basic": ModelInfo(
+        id="pymupdf_basic",
+        name="PyMuPDF Basic",
+        description="Fast text extraction with basic structure detection",
+        features=["text_extraction", "basic_structure"],
+        speed="very_fast",
+        recommended_for=["simple_documents", "text_heavy"],
+        available=True
+    ),
+    "pymupdf_advanced": ModelInfo(
+        id="pymupdf_advanced",
+        name="PyMuPDF Advanced",
+        description="Advanced extraction with table and image detection",
+        features=["text_extraction", "table_detection", "image_extraction", "structure_analysis"],
+        speed="fast",
+        recommended_for=["complex_documents", "tables", "mixed_content"],
+        available=True
+    ),
+    "docling": ModelInfo(
+        id="docling",
+        name="Docling AI",
+        description="IBM's advanced document understanding model",
+        features=["ai_analysis", "semantic_structure", "layout_detection"],
+        speed="medium",
+        recommended_for=["research_papers", "complex_layouts"],
+        available=False  # Would require additional setup
+    ),
+    "surya": ModelInfo(
+        id="surya",
+        name="Surya OCR",
+        description="Advanced OCR with layout analysis",
+        features=["ocr", "layout_analysis", "multilingual"],
+        speed="medium",
+        recommended_for=["scanned_documents", "handwritten_text"],
+        available=False  # Would require additional setup
+    )
+}
+
+def extract_text_with_positions(pdf_path: str, model: str = "pymupdf_basic") -> ExtractionResult:
+    """Extract text with positional information using PyMuPDF"""
+    start_time = datetime.now()
     
-    web_app = FastAPI()
-    
-    @web_app.post("/extract")
-    async def process_extraction(data: dict):
-        try:
-            upload_id = data.get("upload_id")
-            models = data.get("models", ["docling"])
-            options = data.get("options", {})
-            
-            if not upload_id:
-                raise HTTPException(status_code=400, detail="Upload ID required")
-            
-            file_path = f"/tmp/storage/{upload_id}.pdf"
-            
-            if not os.path.exists(file_path):
-                raise HTTPException(status_code=404, detail="File not found")
-            
-            results = {}
-            
-            # Process with each selected model
-            for model_name in models:
-                start_time = datetime.now()
-                
-                try:
-                    if model_name == "docling":
-                        # Import and use Docling pipeline
-                        from models.docling_pipeline import process_with_docling
-                        result = await process_with_docling(file_path, options)
-                    elif model_name == "surya":
-                        # Import and use Surya pipeline
-                        from models.surya_pipeline import process_with_surya
-                        result = await process_with_surya(file_path, options)
-                    elif model_name == "mineru":
-                        # Import and use MinerU pipeline
-                        from models.mineru_pipeline import process_with_mineru
-                        result = await process_with_mineru(file_path, options)
-                    elif model_name == "pymupdf_basic":
-                        result = await process_with_pymupdf_basic(file_path, options)
-                    elif model_name == "pymupdf_advanced":
-                        result = await process_with_pymupdf_advanced(file_path, options)
-                    else:
-                        continue
-                    
-                    processing_time = (datetime.now() - start_time).total_seconds()
-                    
-                    results[model_name] = {
-                        **result,
-                        "processing_time": processing_time,
-                        "model": model_name
-                    }
-                
-                except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.error(f"Error processing with {model_name}: {e}")
-                    results[model_name] = {
-                        "markdown": "",
-                        "elements": [],
-                        "metadata": {"total_pages": 0, "total_elements": 0, "confidence_avg": 0},
-                        "success": False,
-                        "error": str(e),
-                        "processing_time": (datetime.now() - start_time).total_seconds(),
-                        "model": model_name
-                    }
-            
-            return JSONResponse({
-                "upload_id": upload_id,
-                "results": results,
-                "status": "completed"
-            })
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    async def process_with_pymupdf_basic(file_path: str, options: dict):
-        """Process PDF with basic PyMuPDF extraction"""
-        doc = fitz.open(file_path)
-        
-        content = ""
+    try:
+        doc = fitz.open(pdf_path)
         elements = []
+        full_text = []
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            page_text = page.get_text()
-            content += f"\n\n## Page {page_num + 1}\n\n{page_text}"
-            
-            # Extract text blocks with basic positioning
-            blocks = page.get_text("dict")
-            for block_idx, block in enumerate(blocks["blocks"]):
-                if "lines" in block:
-                    block_text = ""
-                    for line in block["lines"]:
-                        for span in line["spans"]:
-                            block_text += span["text"]
-                    
-                    if block_text.strip():
-                        elements.append({
-                            "id": f"page_{page_num}_block_{block_idx}",
-                            "type": "text",
-                            "content": block_text.strip(),
-                            "bbox": {
-                                "x1": block["bbox"][0],
-                                "y1": block["bbox"][1], 
-                                "x2": block["bbox"][2],
-                                "y2": block["bbox"][3],
-                                "page": page_num
-                            },
-                            "confidence": 0.85
-                        })
-        
-        doc.close()
-        
-        return {
-            "markdown": content,
-            "elements": elements,
-            "metadata": {
-                "total_pages": len(doc),
-                "total_elements": len(elements),
-                "confidence_avg": 0.85,
-                "by_type": {"text": len(elements)},
-                "features_detected": ["text"],
-                "model_version": "pymupdf_basic_v1.0"
-            },
-            "success": True
-        }
-    
-    async def process_with_pymupdf_advanced(file_path: str, options: dict):
-        """Process PDF with advanced PyMuPDF extraction including tables"""
-        doc = fitz.open(file_path)
-        
-        content = ""
-        elements = []
+        total_confidence = 0
+        element_count = 0
         
         for page_num in range(len(doc)):
             page = doc[page_num]
             
-            # Extract text blocks
-            blocks = page.get_text("dict")
-            page_content = f"\n\n## Page {page_num + 1}\n\n"
-            
-            for block_idx, block in enumerate(blocks["blocks"]):
-                if "lines" in block:
-                    block_text = ""
-                    for line in block["lines"]:
-                        for span in line["spans"]:
-                            block_text += span["text"]
-                    
-                    if block_text.strip():
-                        elements.append({
-                            "id": f"page_{page_num}_block_{block_idx}",
-                            "type": "text",
-                            "content": block_text.strip(),
-                            "bbox": {
-                                "x1": block["bbox"][0],
-                                "y1": block["bbox"][1],
-                                "x2": block["bbox"][2], 
-                                "y2": block["bbox"][3],
-                                "page": page_num
-                            },
-                            "confidence": 0.90
-                        })
-                        page_content += f"{block_text.strip()}\n\n"
-            
-            # Extract tables
-            try:
-                tables = page.find_tables()
-                for table_idx, table in enumerate(tables):
-                    table_data = table.extract()
-                    if table_data:
-                        elements.append({
-                            "id": f"page_{page_num}_table_{table_idx}",
-                            "type": "table",
-                            "content": str(table_data),
-                            "bbox": {
-                                "x1": table.bbox[0],
-                                "y1": table.bbox[1],
-                                "x2": table.bbox[2],
-                                "y2": table.bbox[3], 
-                                "page": page_num
-                            },
-                            "confidence": 0.85
-                        })
+            if model == "pymupdf_advanced":
+                # Advanced extraction with tables and images
+                blocks = page.get_text("dict")
+                
+                # Extract text blocks
+                for block in blocks["blocks"]:
+                    if "lines" in block:  # Text block
+                        block_text = ""
+                        bbox = block["bbox"]
                         
-                        # Format as markdown table
-                        if len(table_data) > 0:
-                            headers = table_data[0]
-                            page_content += "\n| " + " | ".join(headers) + " |\n"
-                            page_content += "| " + " | ".join(["---"] * len(headers)) + " |\n"
-                            for row in table_data[1:]:
-                                if len(row) == len(headers):
-                                    page_content += "| " + " | ".join(row) + " |\n"
-                            page_content += "\n"
-            except:
-                pass
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                block_text += span["text"]
+                        
+                        if block_text.strip():
+                            elements.append(ElementInfo(
+                                type="text",
+                                content=block_text.strip(),
+                                bbox=list(bbox),
+                                page=page_num + 1,
+                                confidence=0.95
+                            ))
+                            full_text.append(block_text.strip())
+                            total_confidence += 0.95
+                            element_count += 1
+                
+                # Extract tables
+                tables = page.find_tables()
+                for table in tables:
+                    try:
+                        df = table.to_pandas()
+                        table_markdown = df.to_markdown(index=False)
+                        elements.append(ElementInfo(
+                            type="table",
+                            content=table_markdown,
+                            bbox=list(table.bbox),
+                            page=page_num + 1,
+                            confidence=0.85
+                        ))
+                        full_text.append(f"\n{table_markdown}\n")
+                        total_confidence += 0.85
+                        element_count += 1
+                    except Exception as e:
+                        print(f"Table extraction error: {e}")
+                
+                # Extract images
+                image_list = page.get_images()
+                for img_index, img in enumerate(image_list):
+                    try:
+                        xref = img[0]
+                        base_image = doc.extract_image(xref)
+                        elements.append(ElementInfo(
+                            type="image",
+                            content=f"[Image {img_index + 1} on page {page_num + 1}]",
+                            bbox=[0, 0, page.rect.width, page.rect.height],
+                            page=page_num + 1,
+                            confidence=0.90
+                        ))
+                        total_confidence += 0.90
+                        element_count += 1
+                    except Exception as e:
+                        print(f"Image extraction error: {e}")
             
-            content += page_content
+            else:  # Basic extraction
+                text = page.get_text()
+                if text.strip():
+                    elements.append(ElementInfo(
+                        type="text",
+                        content=text.strip(),
+                        bbox=[0, 0, page.rect.width, page.rect.height],
+                        page=page_num + 1,
+                        confidence=0.90
+                    ))
+                    full_text.append(text.strip())
+                    total_confidence += 0.90
+                    element_count += 1
         
         doc.close()
         
-        element_types = {}
-        for element in elements:
-            element_type = element["type"]
-            element_types[element_type] = element_types.get(element_type, 0) + 1
+        # Generate markdown
+        markdown_content = "\n\n".join(full_text)
         
-        return {
-            "markdown": content,
-            "elements": elements,
-            "metadata": {
+        # Calculate metadata
+        processing_time = (datetime.now() - start_time).total_seconds()
+        avg_confidence = total_confidence / element_count if element_count > 0 else 0
+        
+        return ExtractionResult(
+            markdown=markdown_content,
+            elements=elements,
+            metadata={
                 "total_pages": len(doc),
                 "total_elements": len(elements),
-                "confidence_avg": sum(e["confidence"] for e in elements) / len(elements) if elements else 0.87,
-                "by_type": element_types,
-                "features_detected": ["text", "tables"],
-                "model_version": "pymupdf_advanced_v1.0"
+                "confidence_avg": round(avg_confidence, 2),
+                "processing_time": round(processing_time, 2),
+                "model_used": model
             },
-            "success": True
+            processing_time=round(processing_time, 2),
+            model=model
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+def generate_annotated_image(pdf_path: str, page_num: int, elements: List[ElementInfo]) -> bytes:
+    """Generate annotated image showing detected elements"""
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[page_num - 1]  # Convert to 0-based indexing
+        
+        # Render page as image
+        mat = fitz.Matrix(2, 2)  # 2x zoom for better quality
+        pix = page.get_pixmap(matrix=mat)
+        img_data = pix.tobytes("png")
+        
+        # Open with PIL
+        img = Image.open(io.BytesIO(img_data))
+        draw = ImageDraw.Draw(img)
+        
+        # Draw bounding boxes for elements on this page
+        page_elements = [e for e in elements if e.page == page_num]
+        
+        colors = {
+            "text": "blue",
+            "table": "green", 
+            "image": "red",
+            "heading": "purple"
         }
+        
+        for element in page_elements:
+            bbox = element.bbox
+            # Scale bbox coordinates by zoom factor
+            scaled_bbox = [coord * 2 for coord in bbox]
+            color = colors.get(element.type, "orange")
+            
+            # Draw rectangle
+            draw.rectangle(scaled_bbox, outline=color, width=3)
+            
+            # Add label
+            draw.text((scaled_bbox[0], scaled_bbox[1] - 20), 
+                     f"{element.type} ({element.confidence:.2f})", 
+                     fill=color)
+        
+        doc.close()
+        
+        # Convert back to bytes
+        output = io.BytesIO()
+        img.save(output, format="PNG")
+        return output.getvalue()
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+# API Routes
+@web_app.post("/upload", response_model=UploadResponse)
+async def upload_file(file: UploadFile = File(...)):
+    """Upload PDF file for processing"""
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
     
-    return await web_app(request.scope, request.receive, request.send)
+    # Generate unique upload ID
+    upload_id = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{hash(file.filename) % 10000}"
+    
+    try:
+        # Save file to volume
+        file_path = f"/mnt/storage/{upload_id}.pdf"
+        content = await file.read()
+        
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        # Get basic info
+        doc = fitz.open(file_path)
+        page_count = len(doc)
+        doc.close()
+        
+        return UploadResponse(
+            upload_id=upload_id,
+            filename=file.filename,
+            size=len(content),
+            pages=page_count,
+            status="uploaded"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+@web_app.post("/extract", response_model=ExtractResponse)
+async def extract_content(request: ExtractionRequest):
+    """Extract content using specified models"""
+    file_path = f"/mnt/storage/{request.upload_id}.pdf"
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    results = {}
+    
+    try:
+        for model in request.models:
+            if model not in AVAILABLE_MODELS:
+                raise HTTPException(status_code=400, detail=f"Model {model} not available")
+            
+            if not AVAILABLE_MODELS[model].available:
+                raise HTTPException(status_code=400, detail=f"Model {model} not currently available")
+            
+            # Extract using the specified model
+            result = extract_text_with_positions(file_path, model)
+            results[model] = result
+        
+        return ExtractResponse(
+            upload_id=request.upload_id,
+            results=results,
+            status="completed"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+@web_app.get("/annotated-image/{upload_id}/{model}/{page}")
+async def get_annotated_image(upload_id: str, model: str, page: int):
+    """Get annotated image showing detected elements"""
+    file_path = f"/mnt/storage/{upload_id}.pdf"
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    try:
+        # Get extraction results first
+        result = extract_text_with_positions(file_path, model)
+        
+        # Generate annotated image
+        img_bytes = generate_annotated_image(file_path, page, result.elements)
+        
+        return Response(
+            content=img_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "max-age=3600"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+@web_app.get("/models")
+async def get_models():
+    """Get available extraction models"""
+    return {"models": list(AVAILABLE_MODELS.values())}
+
+@web_app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return JSONResponse({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "available_models": len([m for m in AVAILABLE_MODELS.values() if m.available])
+    })
+
+# Modal web endpoints with proper FastAPI integration
+@app.function(
+    image=image,
+    volumes={"/mnt/storage": storage},
+    timeout=300,
+    memory=1024
+)
+@modal.asgi_app()
+def upload_endpoint():
+    """Handle file uploads"""
+    from fastapi import FastAPI, File, UploadFile
+    app = FastAPI()
+    
+    @app.post("/")
+    async def upload_file_endpoint(file: UploadFile = File(...)):
+        return await upload_file(file)
+    
+    return app
+
+@app.function(
+    image=image, 
+    volumes={"/mnt/storage": storage},
+    timeout=300,
+    memory=2048
+)
+@modal.asgi_app()
+def extract_endpoint():
+    """Handle content extraction"""
+    from fastapi import FastAPI
+    app = FastAPI()
+    
+    @app.post("/")
+    async def extract_content_endpoint(request: ExtractionRequest):
+        return await extract_content(request)
+    
+    return app
 
 @app.function(
     image=image,
-    volumes={"/tmp/storage": volume},
-    timeout=300,
-    memory=2048,
+    volumes={"/mnt/storage": storage}, 
+    timeout=120,
+    memory=1024
 )
-@modal.web_endpoint(method="GET", label="annotated-image")
-async def get_annotated_image(request):
-    """Generate annotated PDF image"""
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import Response
-    import fitz
-    import io
-    from PIL import Image, ImageDraw
-    
-    web_app = FastAPI()
-    
-    @web_app.get("/annotated-image/{upload_id}/{model_name}/{page_num}")
-    async def generate_annotated_image(upload_id: str, model_name: str, page_num: int):
-        try:
-            file_path = f"/tmp/storage/{upload_id}.pdf"
-            
-            if not os.path.exists(file_path):
-                raise HTTPException(status_code=404, detail="File not found")
-            
-            # Open PDF and get page
-            doc = fitz.open(file_path)
-            page = doc[page_num]
-            
-            # Render page as image
-            mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better quality
-            pix = page.get_pixmap(matrix=mat)
-            img_data = pix.tobytes("png")
-            
-            # Load with PIL for annotation
-            img = Image.open(io.BytesIO(img_data))
-            draw = ImageDraw.Draw(img)
-            
-            # Add mock annotations (replace with real extraction results)
-            # Title - Red
-            draw.rectangle([100, 100, 500, 150], outline="red", width=3)
-            # Header - Orange  
-            draw.rectangle([100, 200, 400, 230], outline="orange", width=2)
-            # Text blocks - Blue
-            draw.rectangle([100, 250, 600, 400], outline="blue", width=2)
-            # Table - Green
-            draw.rectangle([100, 450, 600, 600], outline="green", width=3)
-            
-            doc.close()
-            
-            # Return image as PNG
-            img_buffer = io.BytesIO()
-            img.save(img_buffer, format="PNG")
-            img_buffer.seek(0)
-            
-            return Response(
-                content=img_buffer.getvalue(),
-                media_type="image/png"
-            )
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    return await web_app(request.scope, request.receive, request.send)
-
-@app.function(image=image)
-@modal.web_endpoint(method="GET", label="models")
-async def get_available_models():
-    """Get list of available models"""
+@modal.asgi_app()
+def annotated_image_endpoint():
+    """Handle annotated image requests"""
     from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
+    app = FastAPI()
     
-    web_app = FastAPI()
+    @app.get("/{upload_id}/{model}/{page}")
+    async def get_annotated_image_endpoint(upload_id: str, model: str, page: int):
+        return await get_annotated_image(upload_id, model, page)
     
-    @web_app.get("/models")
-    async def list_models():
-        # Import logging
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        models = [
-            {
-                "id": "docling",
-                "name": "Docling",
-                "description": "IBM's document understanding AI model",
-                "features": ["Tables", "Hierarchical structure", "Element classification", "Metadata"],
-                "speed": "Fast (5-10s per page)",
-                "recommended_for": ["Business documents", "Reports", "Invoices", "Structured documents"],
-                "available": True
-            },
-            {
-                "id": "surya",
-                "name": "Surya",
-                "description": "Multilingual OCR and layout analysis",
-                "features": ["90+ languages", "Layout detection", "Reading order", "Language detection"],
-                "speed": "Medium (10-15s per page)",
-                "recommended_for": ["Non-English documents", "Complex layouts", "Multilingual content"],
-                "available": True
-            },
-            {
-                "id": "mineru",
-                "name": "MinerU",
-                "description": "Scientific document processing with formula extraction",
-                "features": ["LaTeX formulas", "Citations", "Academic structure", "Formula conversion"],
-                "speed": "Medium (8-12s per page)",
-                "recommended_for": ["Research papers", "Academic articles", "Scientific documents"],
-                "available": True
-            },
-            {
-                "id": "pymupdf_basic",
-                "name": "PyMuPDF Basic",
-                "description": "Fast and lightweight PDF text extraction",
-                "features": ["Text extraction", "Basic positioning", "Fast processing"],
-                "speed": "Very Fast (1-2s per page)",
-                "recommended_for": ["Simple documents", "Quick extraction", "Text-only needs"],
-                "available": True
-            },
-            {
-                "id": "pymupdf_advanced",
-                "name": "PyMuPDF Advanced",
-                "description": "Enhanced PyMuPDF with table detection",
-                "features": ["Text extraction", "Table detection", "Layout analysis", "Positioning"],
-                "speed": "Fast (2-4s per page)",
-                "recommended_for": ["Documents with tables", "Structured content", "Reliable extraction"],
-                "available": True
-            }
-        ]
-        
-        return JSONResponse({"models": models})
+    return app
+
+@app.function(image=image, timeout=30)
+@modal.asgi_app()
+def models_endpoint():
+    """Handle model list requests"""
+    from fastapi import FastAPI
+    app = FastAPI()
     
-    return await web_app(request.scope, request.receive, request.send)
+    @app.get("/")
+    async def get_models_endpoint():
+        return await get_models()
+    
+    return app
+
+@app.function(image=image, timeout=30)
+@modal.asgi_app()
+def health_endpoint():
+    """Handle health check requests"""
+    from fastapi import FastAPI
+    app = FastAPI()
+    
+    @app.get("/")
+    async def health_check_endpoint():
+        return await health_check()
+    
+    return app
 
 if __name__ == "__main__":
-    print("Deploy with: modal deploy modal_app.py")
-    print("Available endpoints:")
-    print("- POST /upload - Upload PDF files")
-    print("- POST /extract - Extract content")
-    print("- GET /annotated-image/{upload_id}/{model}/{page} - Get annotated images")
-    print("- GET /models - List available models")
+    # For local development
+    import uvicorn
+    uvicorn.run(web_app, host="0.0.0.0", port=8000)
