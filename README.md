@@ -152,7 +152,12 @@ pdf-extraction-playground/
 │   └── styles/              # Global styles
 ├── backend/                 # FastAPI backend (separate deployment)
 ├── public/                  # Static assets
-└── docs/                    # Additional documentation
+├── docs/                    # Comprehensive documentation
+│   ├── USER_GUIDE.md        # Step-by-step user manual
+│   ├── API_DOCUMENTATION.md # Complete API reference
+│   ├── MODEL_SELECTION_GUIDE.md # AI model comparison guide
+│   └── TECHNICAL_ARCHITECTURE.md # System architecture docs
+└── [Additional files...]
 ```
 
 ## 🔌 API Reference
@@ -331,12 +336,31 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Next.js Team** - React framework
 - **Shadcn** - UI component library
 
+## � Documentation
+
+### � **Complete Documentation Suite**
+
+| Document | Description | Audience |
+|----------|-------------|----------|
+| **[📖 User Guide](docs/USER_GUIDE.md)** | Step-by-step usage instructions | End Users |
+| **[🔌 API Documentation](docs/API_DOCUMENTATION.md)** | Complete API reference with examples | Developers |
+| **[🤖 Model Selection Guide](docs/MODEL_SELECTION_GUIDE.md)** | AI model comparison and recommendations | All Users |
+| **[🏗️ Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md)** | System design and architecture | Developers |
+| **[🚀 Deployment Guide](DEPLOYMENT.md)** | Production deployment instructions | DevOps |
+
+### 🎯 **Quick Links**
+
+- **Interactive API Docs**: https://spacecypher--pdf-extraction-simple-fastapi-app.modal.run/docs
+- **Live Demo**: [Coming Soon - Deploy to get your URL]
+- **Model Performance**: See [Model Selection Guide](docs/MODEL_SELECTION_GUIDE.md) for benchmarks
+- **Integration Examples**: Check [API Documentation](docs/API_DOCUMENTATION.md) for SDKs
+
 ## 📞 Support
 
 - 📧 **Email**: support@pdf-extraction-playground.com
 - 💬 **Discord**: [Join our community](https://discord.gg/pdf-extraction)
-- 📖 **Documentation**: [docs.pdf-extraction-playground.com](https://docs.pdf-extraction-playground.com)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-username/pdf-extraction-playground/issues)
+- 📖 **Documentation**: See links above for comprehensive guides
+- 🐛 **Issues**: [GitHub Issues](https://github.com/SpaceCypher/pdf-extractor-ta/issues)
 
 ## 🗺️ Roadmap
 
