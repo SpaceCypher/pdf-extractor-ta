@@ -213,6 +213,57 @@ class DoclingPipeline:
                             markdown_content += f"\n{self._format_table_markdown(table_data)}\n\n"
                 except:
                     pass  # Table extraction is optional
+                
+                # Extract images from the page
+                try:
+                    image_list = page.get_images(full=True)
+                    for img_idx, img in enumerate(image_list):
+                        # Get image info
+                        xref = img[0]
+                        pix = fitz.Pixmap(doc, xref)
+                        
+                        # Skip very small images (likely decorative)
+                        if pix.width < 50 or pix.height < 50:
+                            pix = None
+                            continue
+                        
+                        # Get image bbox - estimate from page content if not available
+                        img_bbox = self._estimate_image_bbox(page, xref, pix)
+                        
+                        # Create image element
+                        image_element = {
+                            "id": f"page_{page_num}_image_{img_idx}",
+                            "type": "image",
+                            "content": f"[Image: {pix.width}x{pix.height} pixels]",
+                            "bbox": {
+                                "x1": img_bbox[0],
+                                "y1": img_bbox[1],
+                                "x2": img_bbox[2],
+                                "y2": img_bbox[3],
+                                "page": page_num
+                            },
+                            "confidence": 0.90,
+                            "image_info": {
+                                "width": pix.width,
+                                "height": pix.height,
+                                "colorspace": pix.colorspace.name if pix.colorspace else "Unknown",
+                                "xref": xref,
+                                "size_bytes": len(pix.tobytes())
+                            }
+                        }
+                        
+                        elements.append(image_element)
+                        
+                        # Add image to markdown
+                        page_content += f"\n![Image {img_idx + 1}](image_{page_num}_{img_idx}.png)\n"
+                        page_content += f"*Image: {pix.width}x{pix.height} pixels*\n\n"
+                        
+                        # Clean up pixmap
+                        pix = None
+                        
+                except Exception as e:
+                    logger.warning(f"Image extraction failed for page {page_num}: {e}")
+                    pass
             
             doc.close()
             
@@ -276,6 +327,33 @@ class DoclingPipeline:
                 markdown += "| " + " | ".join(row) + " |\n"
         
         return markdown
+    
+    def _estimate_image_bbox(self, page, xref: int, pix) -> List[float]:
+        """Estimate image bounding box on the page"""
+        try:
+            # Try to get the actual image rect from page
+            page_rect = page.rect
+            
+            # If we can't find exact placement, estimate based on image size and page layout
+            page_width = page_rect.width
+            page_height = page_rect.height
+            
+            # Estimate position - center the image with reasonable margins
+            img_width = min(pix.width, page_width * 0.8)  # Don't exceed 80% of page width
+            img_height = min(pix.height, page_height * 0.6)  # Don't exceed 60% of page height
+            
+            # Center horizontally, place in middle/lower section vertically
+            x1 = (page_width - img_width) / 2
+            y1 = page_height * 0.3  # Start at 30% down the page
+            x2 = x1 + img_width
+            y2 = y1 + img_height
+            
+            return [x1, y1, x2, y2]
+            
+        except Exception as e:
+            logger.warning(f"Could not estimate image bbox: {e}")
+            # Fallback to default positioning
+            return [100, 200, 400, 500]
 
 
 # Global instance

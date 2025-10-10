@@ -146,10 +146,11 @@ class SuryaPipeline:
                 if layout_result and hasattr(layout_result, 'bboxes'):
                     for i, (bbox, label) in enumerate(zip(layout_result.bboxes, layout_result.labels)):
                         if label in ['Table', 'Figure', 'Chart']:
+                            element_type = "table" if label == "Table" else "image"
                             elements.append({
                                 "id": f"page_{page_num}_layout_{i}",
-                                "type": label.lower(),
-                                "content": f"[{label} detected]",
+                                "type": element_type,
+                                "content": f"[{label} detected at layout analysis]",
                                 "bbox": {
                                     "x1": bbox[0],
                                     "y1": bbox[1],
@@ -158,7 +159,8 @@ class SuryaPipeline:
                                     "page": page_num
                                 },
                                 "confidence": 0.85,
-                                "language": "layout"
+                                "language": "layout",
+                                "layout_type": label
                             })
                 
                 markdown_content += page_content
@@ -220,6 +222,33 @@ class SuryaPipeline:
             counts[element_type] = counts.get(element_type, 0) + 1
         return counts
     
+    def _estimate_image_bbox(self, page, xref: int, pix) -> List[float]:
+        """Estimate image bounding box on the page"""
+        try:
+            # Try to get the actual image rect from page
+            page_rect = page.rect
+            
+            # If we can't find exact placement, estimate based on image size and page layout
+            page_width = page_rect.width
+            page_height = page_rect.height
+            
+            # Estimate position - center the image with reasonable margins
+            img_width = min(pix.width, page_width * 0.8)  # Don't exceed 80% of page width
+            img_height = min(pix.height, page_height * 0.6)  # Don't exceed 60% of page height
+            
+            # Center horizontally, place in middle/lower section vertically
+            x1 = (page_width - img_width) / 2
+            y1 = page_height * 0.3  # Start at 30% down the page
+            x2 = x1 + img_width
+            y2 = y1 + img_height
+            
+            return [x1, y1, x2, y2]
+            
+        except Exception as e:
+            logger.warning(f"Could not estimate image bbox: {e}")
+            # Fallback to default positioning
+            return [100, 200, 400, 500]
+    
     async def _fallback_extraction(self, file_path: str, options: Dict[str, Any] = None) -> Dict[str, Any]:
         """Fallback extraction using PyMuPDF with OCR-like processing"""
         try:
@@ -270,6 +299,59 @@ class SuryaPipeline:
                                 })
                                 
                                 page_content += f"{block_text.strip()}\n\n"
+                    
+                    # Extract images from the page
+                    try:
+                        image_list = page.get_images(full=True)
+                        for img_idx, img in enumerate(image_list):
+                            # Get image info
+                            xref = img[0]
+                            pix_img = fitz.Pixmap(doc, xref)
+                            
+                            # Skip very small images (likely decorative)
+                            if pix_img.width < 50 or pix_img.height < 50:
+                                pix_img = None
+                                continue
+                            
+                            # Get image bbox - estimate from page content if not available
+                            img_bbox = self._estimate_image_bbox(page, xref, pix_img)
+                            
+                            # Create image element
+                            image_element = {
+                                "id": f"page_{page_num}_image_{img_idx}",
+                                "type": "image",
+                                "content": f"[Image: {pix_img.width}x{pix_img.height} pixels]",
+                                "bbox": {
+                                    "x1": img_bbox[0],
+                                    "y1": img_bbox[1],
+                                    "x2": img_bbox[2],
+                                    "y2": img_bbox[3],
+                                    "page": page_num
+                                },
+                                "confidence": 0.85,
+                                "language": "image",
+                                "image_info": {
+                                    "width": pix_img.width,
+                                    "height": pix_img.height,
+                                    "colorspace": pix_img.colorspace.name if pix_img.colorspace else "Unknown",
+                                    "xref": xref,
+                                    "size_bytes": len(pix_img.tobytes())
+                                }
+                            }
+                            
+                            elements.append(image_element)
+                            
+                            # Add image to markdown
+                            page_content += f"\n![Image {img_idx + 1}](image_{page_num}_{img_idx}.png)\n"
+                            page_content += f"*Image: {pix_img.width}x{pix_img.height} pixels*\n\n"
+                            
+                            # Clean up pixmap
+                            pix_img = None
+                            
+                    except Exception as e:
+                        logger.warning(f"Image extraction failed for page {page_num}: {e}")
+                        pass
+                    
                     else:
                         # Very basic fallback
                         page_content += f"[Scanned page - OCR needed]\n\n"
@@ -312,6 +394,58 @@ class SuryaPipeline:
                             })
                             
                             page_content += f"{block_text.strip()}\n\n"
+                    
+                    # Extract images from the page (for regular text extraction)
+                    try:
+                        image_list = page.get_images(full=True)
+                        for img_idx, img in enumerate(image_list):
+                            # Get image info
+                            xref = img[0]
+                            pix_img = fitz.Pixmap(doc, xref)
+                            
+                            # Skip very small images (likely decorative)
+                            if pix_img.width < 50 or pix_img.height < 50:
+                                pix_img = None
+                                continue
+                            
+                            # Get image bbox - estimate from page content if not available
+                            img_bbox = self._estimate_image_bbox(page, xref, pix_img)
+                            
+                            # Create image element
+                            image_element = {
+                                "id": f"page_{page_num}_image_{img_idx}",
+                                "type": "image",
+                                "content": f"[Image: {pix_img.width}x{pix_img.height} pixels]",
+                                "bbox": {
+                                    "x1": img_bbox[0],
+                                    "y1": img_bbox[1],
+                                    "x2": img_bbox[2],
+                                    "y2": img_bbox[3],
+                                    "page": page_num
+                                },
+                                "confidence": 0.85,
+                                "language": "image",
+                                "image_info": {
+                                    "width": pix_img.width,
+                                    "height": pix_img.height,
+                                    "colorspace": pix_img.colorspace.name if pix_img.colorspace else "Unknown",
+                                    "xref": xref,
+                                    "size_bytes": len(pix_img.tobytes())
+                                }
+                            }
+                            
+                            elements.append(image_element)
+                            
+                            # Add image to markdown
+                            page_content += f"\n![Image {img_idx + 1}](image_{page_num}_{img_idx}.png)\n"
+                            page_content += f"*Image: {pix_img.width}x{pix_img.height} pixels*\n\n"
+                            
+                            # Clean up pixmap
+                            pix_img = None
+                            
+                    except Exception as e:
+                        logger.warning(f"Image extraction failed for page {page_num}: {e}")
+                        pass
                 
                 markdown_content += page_content
             
