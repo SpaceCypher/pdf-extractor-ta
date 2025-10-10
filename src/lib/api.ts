@@ -1,5 +1,14 @@
-// API configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://spacecypher--pdf-extraction-simple-fastapi-app.modal.run';
+// API configuration - Modal endpoints (each function has its own URL)
+const MODAL_ENDPOINTS = {
+  upload: process.env.NEXT_PUBLIC_UPLOAD_URL || 'https://spacecypher--pdf-extraction-prod-upload-endpoint.modal.run',
+  extract: process.env.NEXT_PUBLIC_EXTRACT_URL || 'https://spacecypher--pdf-extraction-prod-extract-endpoint.modal.run',
+  models: process.env.NEXT_PUBLIC_MODELS_URL || 'https://spacecypher--pdf-extraction-prod-models-endpoint.modal.run',
+  annotatedImage: process.env.NEXT_PUBLIC_ANNOTATED_URL || 'https://spacecypher--pdf-extraction-prod-annotated-image-endpoint.modal.run',
+  health: process.env.NEXT_PUBLIC_HEALTH_URL || 'https://spacecypher--pdf-extraction-prod-health-endpoint.modal.run'
+};
+
+// Legacy API base URL for backward compatibility
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || MODAL_ENDPOINTS.upload;
 
 export interface UploadResponse {
   upload_id: string;
@@ -128,7 +137,7 @@ export const api = {
         reject(new Error('Upload cancelled'));
       });
 
-      xhr.open('POST', `${API_BASE_URL}/upload`);
+      xhr.open('POST', MODAL_ENDPOINTS.upload);
       xhr.send(formData);
     });
   },
@@ -141,7 +150,7 @@ export const api = {
   ): Promise<ExtractResponse> {
     console.log('Extracting content with:', { uploadId, models, options });
     
-    const response = await fetch(`${API_BASE_URL}/extract`, {
+    const response = await fetch(MODAL_ENDPOINTS.extract, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,13 +179,13 @@ export const api = {
 
   // Get annotated image for a specific page
   getAnnotatedImageUrl(uploadId: string, model: string, page: number): string {
-    return `${API_BASE_URL}/annotated-image/${uploadId}/${model}/${page}`;
+    return `${MODAL_ENDPOINTS.annotatedImage}/${uploadId}/${model}/${page}`;
   },
 
   // Get available models
   async getModels(): Promise<{ models: ModelInfo[] }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/models`);
+      const response = await fetch(MODAL_ENDPOINTS.models);
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.statusText}`);
       }
@@ -219,20 +228,16 @@ export const api = {
   },
 
   // Download extracted content in various formats
+  // Note: Download endpoint not yet deployed to Modal, using fallback
   async downloadContent(
     uploadId: string,
     model: string,
     format: 'md' | 'html' | 'docx' | 'pdf'
   ): Promise<Blob> {
-    const response = await fetch(
-      `${API_BASE_URL}/download/${uploadId}/${model}/${format}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Download failed: ${response.statusText}`);
-    }
-
-    return response.blob();
+    // For now, create a simple text blob with markdown content
+    // TODO: Add download endpoint to Modal deployment
+    const fallbackContent = `# Downloaded Content\n\nUpload ID: ${uploadId}\nModel: ${model}\nFormat: ${format}\n\nDownload functionality will be available in the next deployment.`;
+    return new Blob([fallbackContent], { type: 'text/plain' });
   },
 };
 
@@ -292,6 +297,19 @@ export const documentHistoryApi = {
     formData.append('total_pages', data.totalPages.toString());
     formData.append('processing_time', data.processingTime.toString());
 
+    // History endpoint not yet deployed to Modal, using localStorage fallback
+    try {
+      const historyData = JSON.parse(localStorage.getItem('documentHistory') || '[]');
+      historyData.push({ ...data, timestamp: new Date().toISOString() });
+      localStorage.setItem('documentHistory', JSON.stringify(historyData));
+      return { success: true };
+    } catch (error) {
+      console.warn('Using localStorage fallback for document history');
+      return { success: false, error: 'LocalStorage fallback used' };
+    }
+    
+    // TODO: Re-enable when history endpoint is deployed
+    /* 
     const response = await fetch(`${API_BASE_URL}/history/save`, {
       method: 'POST',
       body: formData,
@@ -302,9 +320,21 @@ export const documentHistoryApi = {
     }
 
     return response.json();
+    */
   },
 
   async getDocumentHistory(userId?: string) {
+    // History endpoint not yet deployed to Modal, using localStorage fallback
+    try {
+      const historyData = JSON.parse(localStorage.getItem('documentHistory') || '[]');
+      return historyData;
+    } catch (error) {
+      console.warn('Using localStorage fallback for document history');
+      return [];
+    }
+    
+    // TODO: Re-enable when history endpoint is deployed
+    /*
     const url = new URL(`${API_BASE_URL}/history`);
     if (userId) {
       url.searchParams.append('user_id', userId);
@@ -317,6 +347,7 @@ export const documentHistoryApi = {
     }
 
     return response.json();
+    */
   }
 };
 
