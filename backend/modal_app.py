@@ -419,7 +419,18 @@ async def health_check():
 def upload_endpoint():
     """Handle file uploads"""
     from fastapi import FastAPI, File, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
+    
     app = FastAPI()
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allows all origins
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
     
     @app.post("/")
     async def upload_file_endpoint(file: UploadFile = File(...)):
@@ -437,7 +448,18 @@ def upload_endpoint():
 def extract_endpoint():
     """Handle content extraction"""
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    
     app = FastAPI()
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allows all origins
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
     
     @app.post("/")
     async def extract_content_endpoint(request: ExtractionRequest):
@@ -455,7 +477,18 @@ def extract_endpoint():
 def annotated_image_endpoint():
     """Handle annotated image requests"""
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    
     app = FastAPI()
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allows all origins
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
     
     @app.get("/{upload_id}/{model}/{page}")
     async def get_annotated_image_endpoint(upload_id: str, model: str, page: int):
@@ -468,7 +501,18 @@ def annotated_image_endpoint():
 def models_endpoint():
     """Handle model list requests"""
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    
     app = FastAPI()
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allows all origins
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
     
     @app.get("/")
     async def get_models_endpoint():
@@ -481,7 +525,18 @@ def models_endpoint():
 def health_endpoint():
     """Handle health check requests"""
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    
     app = FastAPI()
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allows all origins
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
     
     @app.get("/")
     async def health_check_endpoint():
